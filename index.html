@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Мир Данилов 2</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #16213a;
+    --line: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --good: #4ade80;
+    --bad: #f87171;
+    --white-c: #cbd5e1;
+    --green-c: #34d399;
+    --blue-c: #60a5fa;
+    --yellow-c: #fbbf24;
+    --purple-c: #c084fc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: radial-gradient(circle at top, #1e293b, #0f172a 70%);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    padding: 14px;
+    padding-bottom: 100px;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; text-align: center; }
+  #status {
+    text-align: center; font-size: 12px; color: var(--muted);
+    margin-bottom: 12px;
+  }
+  #status.connected { color: var(--good); }
+  #status.disconnected { color: var(--bad); }
+
+  .card-box {
+    max-width: 480px; margin: 0 auto 14px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  }
+  input[type=text] {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font-size: 15px; margin-bottom: 10px;
+  }
+  button {
+    font-family: inherit; cursor: pointer; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); border-radius: 8px;
+    padding: 9px 14px; font-size: 14px;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+  button.danger { border-color: var(--bad); color: var(--bad); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .hint { font-size: 13px; color: var(--muted); margin: 6px 0; }
+
+  .player-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+  .player-item {
+    padding: 6px 10px; background: var(--panel2); border-radius: 8px; font-size: 14px;
+    display: flex; justify-content: space-between;
+  }
+
+  /* ── Игровая доска ── */
+  #game { max-width: 720px; margin: 0 auto; display: none; }
+  #topbar {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 12px; margin-bottom: 10px; font-size: 13px; color: var(--muted);
+  }
+  #topbar b { color: var(--text); }
+
+  .hp-bar-outer {
+    width: 100%; height: 8px; background: #0b1220; border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .hp-bar-inner { height: 100%; background: linear-gradient(90deg,#4ade80,#22c55e); }
+  .hp-bar-inner.low { background: linear-gradient(90deg,#f87171,#ef4444); }
+
+  .player-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px; margin-bottom: 10px;
+  }
+  .player-panel.turn { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .player-panel.eliminated { opacity: 0.45; }
+  .player-panel.me { border-color: #475569; }
+  .player-head {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;
+    font-size: 14px;
+  }
+  .player-head .name { font-weight: 600; }
+  .player-head .hp-num { font-size: 12px; color: var(--muted); }
+  .table-cards { display: flex; flex-wrap: wrap; gap: 6px; min-height: 6px; }
+  .hand-cards { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+  .mini-card {
+    width: 96px; border-radius: 8px; padding: 6px 7px; font-size: 11px;
+    border: 1px solid var(--line); background: var(--panel2); position: relative;
+    line-height: 1.35;
+  }
+  .mini-card .cname { font-weight: 600; font-size: 11.5px; margin-bottom: 2px; }
+  .mini-card .stats { display: flex; justify-content: space-between; color: var(--muted); }
+  .mini-card .statuses { margin-top: 3px; font-size: 12px; letter-spacing: 1px; }
+  .mini-card.white { border-left: 4px solid var(--white-c); }
+  .mini-card.green { border-left: 4px solid var(--green-c); }
+  .mini-card.blue  { border-left: 4px solid var(--blue-c); }
+  .mini-card.yellow{ border-left: 4px solid var(--yellow-c); }
+  .mini-card.purple{ border-left: 4px solid var(--purple-c); }
+  .mini-card.clickable { cursor: pointer; }
+  .mini-card.clickable:hover { border-color: var(--accent); }
+  .mini-card.selected { outline: 2px solid var(--accent); }
+  .mini-card .prio { position: absolute; top: 4px; right: 6px; font-size: 9px; color: var(--muted); }
+
+  .hand-empty, .table-empty { font-size: 12px; color: #475569; padding: 4px 0; }
+
+  #controls {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: #0b1220ee; border-top: 1px solid var(--line);
+    padding: 10px 14px; backdrop-filter: blur(6px);
+  }
+  #controls .inner { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #controls .hint { flex: 1 1 100%; margin: 0 0 4px; }
+
+  #log-panel {
+    max-width: 720px; margin: 10px auto 0; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    font-size: 12px; color: var(--muted); max-height: 160px; overflow-y: auto;
+  }
+  #log-panel div { margin-bottom: 3px; }
+
+  /* ── Модалка выбора целей ── */
+  #modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    align-items: center; justify-content: center; z-index: 50; padding: 16px;
+  }
+  #modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; max-width: 420px; width: 100%; max-height: 80vh; overflow-y: auto;
+  }
+  #modal h3 { margin: 0 0 10px; font-size: 15px; }
+  .option-btn {
+    display: block; width: 100%; text-align: left; margin-bottom: 6px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; color: var(--text); font-size: 13px;
+  }
+  .option-btn.picked { border-color: var(--accent); }
+  .option-btn:hover { border-color: var(--accent); }
+
+  #winner-banner {
+    max-width: 480px; margin: 30px auto; text-align: center; font-size: 20px;
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 14px; padding: 24px;
+  }
+
+  #boss-pick { max-width: 560px; margin: 0 auto; }
+  .boss-choice { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .boss-card {
+    flex: 1 1 220px; background: var(--panel); border: 1px solid var(--yellow-c);
+    border-radius: 12px; padding: 14px;
+  }
+  .boss-card h4 { margin: 0 0 6px; color: var(--yellow-c); }
+  .boss-card .stats { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+  <h1>🎴 Мир Данилов 2</h1>
+  <div id="status" class="disconnected">Подключение...</div>
+
+  <!-- Экран входа -->
+  <div id="lobby-join" class="card-box">
+    <div class="hint">Введите имя и присоединитесь к игре.</div>
+    <input id="name-input" type="text" placeholder="Ваше имя" maxlength="24">
+    <button class="primary" id="join-btn" style="width:100%">Присоединиться</button>
+  </div>
+
+  <!-- Лобби (ожидание игроков) -->
+  <div id="lobby-wait" class="card-box" style="display:none">
+    <div class="hint">Игроки в лобби:</div>
+    <div class="player-list" id="lobby-players"></div>
+    <button class="primary" id="start-btn" style="width:100%">Начать игру</button>
+    <div class="hint" id="start-hint"></div>
+  </div>
+
+  <!-- Выбор босса -->
+  <div id="boss-pick" style="display:none">
+    <div class="card-box" style="text-align:center">
+      <div class="hint" id="boss-hint">Выберите одну из двух карт-боссов — она уйдёт вам в руку.</div>
+    </div>
+    <div class="boss-choice" id="boss-choice"></div>
+  </div>
+
+  <!-- Игровое поле -->
+  <div id="game">
+    <div id="topbar">
+      <span>Раунд <b id="round-num">0</b></span>
+      <span id="phase-label"></span>
+      <span>Колода: <b id="deck-count">0</b></span>
+    </div>
+    <div id="opponents"></div>
+    <div id="me-panel"></div>
+    <div id="log-panel"></div>
+  </div>
+
+  <div id="winner-banner" style="display:none"></div>
+
+  <!-- Панель управления действием (фикс. снизу) -->
+  <div id="controls" style="display:none">
+    <div class="inner">
+      <div class="hint" id="controls-hint"></div>
+      <div class="row" id="controls-buttons"></div>
+    </div>
+  </div>
+
+  <!-- Модалка выбора целей -->
+  <div id="modal-backdrop">
+    <div id="modal"></div>
+  </div>
+
+<script>
+  const COLOR_NAME = { white: 'белая', green: 'зелёная', blue: 'синяя', yellow: 'жёлтая', purple: 'фиолетовая' };
+  const STATUS_ICONS = [
+    ['poison', '☠️'], ['virus', '🦠'], ['stun', '💫'], ['freeze', '❄️'],
+    ['invuln', '🛡️'], ['wall', '🧱'], ['guardianAngel', '👼'],
+  ];
+
+  let ws = null;
+  let myId = null;
+  let state = null; // последнее состояние от сервера
+
+  const statusEl = document.getElementById('status');
+  const el = (id) => document.getElementById(id);
+
+  function connect() {
+    const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${protocol}://${location.host}`);
+    ws.onopen = () => { statusEl.textContent = 'Подключено'; statusEl.className = 'connected'; };
+    ws.onclose = () => { statusEl.textContent = 'Соединение потеряно — обновите страницу'; statusEl.className = 'disconnected'; };
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'welcome') { myId = data.id; }
+      else if (data.type === 'state') { state = data; render(); }
+      else if (data.type === 'error') { showToast(data.message); }
+    };
+  }
+  connect();
+
+  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#7f1d1d;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.4)';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
+  }
+
+  // ───────────────────────── Вход и лобби ─────────────────────────
+
+  el('join-btn').addEventListener('click', () => {
+    const name = el('name-input').value.trim() || 'Игрок';
+    send({ type: 'join', name });
+    el('lobby-join').style.display = 'none';
+    el('lobby-wait').style.display = 'block';
+  });
+  el('name-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('join-btn').click(); });
+
+  el('start-btn').addEventListener('click', () => send({ type: 'start_game' }));
+
+  // ───────────────────────── Рендер ─────────────────────────
+
+  function render() {
+    if (!state) return;
+
+    if (state.phase === 'lobby') {
+      el('lobby-join').style.display = myId ? 'none' : 'block';
+      el('lobby-wait').style.display = myId ? 'block' : 'none';
+      el('boss-pick').style.display = 'none';
+      el('game').style.display = 'none';
+      el('controls').style.display = 'none';
+      el('winner-banner').style.display = 'none';
+      renderLobbyPlayers();
+      return;
+    }
+
+    el('lobby-join').style.display = 'none';
+    el('lobby-wait').style.display = 'none';
+
+    if (state.phase === 'boss_pick') {
+      el('boss-pick').style.display = 'block';
+      el('game').style.display = 'none';
+      el('controls').style.display = 'none';
+      renderBossPick();
+      return;
+    }
+
+    el('boss-pick').style.display = 'none';
+    el('game').style.display = 'block';
+    renderGame();
+
+    if (state.phase === 'ended') {
+      el('winner-banner').style.display = 'block';
+      const w = state.players.find((p) => p.id === state.winnerId);
+      el('winner-banner').innerHTML = w
+        ? `🏆 Победитель: <b>${escapeHtml(w.name)}</b>${w.id === myId ? ' — это вы!' : ''}`
+        : '🤝 Игра окончена вничью.';
+      el('controls').style.display = 'none';
+    } else {
+      el('winner-banner').style.display = 'none';
+      renderControls();
+    }
+  }
+
+  function renderLobbyPlayers() {
+    const box = el('lobby-players');
+    box.innerHTML = (state.players || []).map((p) =>
+      `<div class="player-item"><span>${escapeHtml(p.name)}${p.id === myId ? ' (вы)' : ''}</span></div>`
+    ).join('') || '<div class="hint">Пока никого нет...</div>';
+    const n = (state.players || []).length;
+    el('start-hint').textContent = n < 2 ? `Нужно минимум 2 игрока (сейчас ${n}).` : `Готово к началу: ${n} игрок(ов).`;
+    el('start-btn').disabled = n < 2;
+  }
+
+  function renderBossPick() {
+    const me = state.me;
+    const box = el('boss-choice');
+    if (me && me.bossChoices) {
+      const { a, b } = me.bossChoices;
+      box.innerHTML = [a, b].map((c, i) => `
+        <div class="boss-card">
+          <h4>${escapeHtml(c.name)}</h4>
+          <div class="stats">❤️ ${c.hp}  ⚔️ ${c.atk}</div>
+          <div class="hint">${escapeHtml(c.text)}</div>
+          <button class="primary" data-choice="${i === 0 ? 'a' : 'b'}" style="width:100%;margin-top:6px">Выбрать</button>
+        </div>`).join('');
+      box.querySelectorAll('[data-choice]').forEach((btn) =>
+        btn.addEventListener('click', () => send({ type: 'pick_boss', choice: btn.dataset.choice })));
+      el('boss-hint').textContent = 'Выберите одну из двух карт-боссов — она уйдёт вам в руку.';
+    } else {
+      box.innerHTML = '';
+      el('boss-hint').textContent = 'Вы выбрали. Ждём остальных игроков...';
+    }
+  }
+
+  function renderGame() {
+    el('round-num').textContent = state.round + 1;
+    el('deck-count').textContent = state.deckCount;
+    const cur = state.players.find((p) => p.id === state.currentPlayerId);
+    el('phase-label').textContent = `${phaseLabel(state.phase)} — ходит: ${cur ? escapeHtml(cur.name) : '?'}`;
+
+    const opponents = state.players.filter((p) => p.id !== myId);
+    el('opponents').innerHTML = opponents.map((p) => renderPlayerPanel(p, false)).join('');
+
+    const me = state.players.find((p) => p.id === myId);
+    el('me-panel').innerHTML = me ? renderPlayerPanel(me, true) : '';
+
+    el('log-panel').innerHTML = state.log.slice().reverse().map((l) => `<div>${escapeHtml(l)}</div>`).join('');
+
+    attachCardHandlers();
+  }
+
+  function phaseLabel(phase) {
+    return { draw: 'Добор', action: 'Действие', attack: 'Атака', ended: 'Игра окончена' }[phase] || phase;
+  }
+
+  function renderPlayerPanel(p, isMe) {
+    const hpPct = Math.max(0, Math.round((p.hp / p.maxHp) * 100));
+    const cls = ['player-panel'];
+    if (p.id === state.currentPlayerId) cls.push('turn');
+    if (p.eliminated) cls.push('eliminated');
+    if (isMe) cls.push('me');
+    const tableHtml = p.table.length
+      ? `<div class="table-cards">${p.table.map((c) => renderMiniCard(c, isMe)).join('')}</div>`
+      : `<div class="table-empty">Стол пуст</div>`;
+    let handHtml = '';
+    if (isMe) {
+      handHtml = state.me.hand.length
+        ? `<div class="hand-cards">${state.me.hand.map((c) => renderMiniCard(c, true, true)).join('')}</div>`
+        : `<div class="hand-empty">Рука пуста</div>`;
+    } else {
+      handHtml = `<div class="hint">Карт в руке: ${p.handCount}</div>`;
+    }
+    const poison = p.playerPoison ? ` ☠️×${p.playerPoison.turnsLeft}` : '';
+    return `
+      <div class="${cls.join(' ')}">
+        <div class="player-head">
+          <span class="name">${escapeHtml(p.name)}${isMe ? ' (вы)' : ''}${p.eliminated ? ' — выбыл' : ''}${poison}</span>
+          <span class="hp-num">${p.hp}/${p.maxHp} HP</span>
+        </div>
+        <div class="hp-bar-outer"><div class="hp-bar-inner${hpPct < 30 ? ' low' : ''}" style="width:${hpPct}%"></div></div>
+        ${tableHtml}
+        ${handHtml}
+      </div>`;
+  }
+
+  function renderMiniCard(c, isMine, inHand) {
+    const cls = ['mini-card', c.color];
+    let clickable = false;
+    if (inHand && isMyActionTurn()) clickable = true;
+    if (!inHand && isMine && isMyAttackTurn() && c.hp > 0) clickable = true;
+    if (clickable) cls.push('clickable');
+    if (selection.attackerUid === c.uid) cls.push('selected');
+    if (selection.mainCardUid === c.uid || selection.purpleCardUid === c.uid) cls.push('selected');
+
+    const statuses = STATUS_ICONS.filter(([k]) => c.statuses[k]).map(([, icon]) => icon).join(' ');
+    const prio = c.priority ? `<span class="prio">П${c.priority}</span>` : (c.evasive ? `<span class="prio">👁️</span>` : '');
+    return `
+      <div class="${cls.join(' ')}" data-uid="${c.uid}" data-inhand="${!!inHand}" title="${escapeHtml(c.text || '')}">
+        ${prio}
+        <div class="cname">${escapeHtml(c.name)}</div>
+        <div class="stats"><span>❤️ ${c.hp}/${c.maxHp}</span><span>⚔️ ${c.atk}</span></div>
+        ${statuses ? `<div class="statuses">${statuses}</div>` : ''}
+      </div>`;
+  }
+
+  function isMyActionTurn() { return state.phase === 'action' && state.currentPlayerId === myId; }
+  function isMyAttackTurn() { return state.phase === 'attack' && state.currentPlayerId === myId; }
+
+  // ───────────────────────── Выбор действия ─────────────────────────
+
+  let selection = { mainCardUid: null, purpleCardUid: null, attackerUid: null };
+
+  function attachCardHandlers() {
+    document.querySelectorAll('.mini-card.clickable').forEach((elm) => {
+      elm.addEventListener('click', () => {
+        const uid = elm.dataset.uid;
+        const inHand = elm.dataset.inhand === 'true';
+        if (inHand && isMyActionTurn()) onHandCardClick(uid);
+        else if (!inHand && isMyAttackTurn()) onTableCardClickForAttack(uid);
+      });
+    });
+  }
+
+  function findMyHandCard(uid) { return state.me.hand.find((c) => c.uid === uid); }
+
+  function onHandCardClick(uid) {
+    const card = findMyHandCard(uid);
+    if (!card) return;
+    if (card.color === 'purple') {
+      startPurpleFlow(uid, null);
+    } else {
+      startMainCardFlow(uid);
+    }
+  }
+
+  function startMainCardFlow(mainUid) {
+    const mainCard = findMyHandCard(mainUid);
+    gatherTargets(mainCard.defId, (mainTargets) => {
+      const purples = state.me.hand.filter((c) => c.color === 'purple' && c.uid !== mainUid);
+      if (purples.length === 0) {
+        send({ type: 'play_card', cardUid: mainUid, mainTargets });
+        return;
+      }
+      askComboPurple(purples, (purpleUid) => {
+        if (!purpleUid) {
+          send({ type: 'play_card', cardUid: mainUid, mainTargets });
+        } else {
+          const purpleCard = findMyHandCard(purpleUid);
+          gatherTargets(purpleCard.defId, (purpleTargets) => {
+            send({ type: 'play_card', cardUid: mainUid, purpleUid, mainTargets, purpleTargets });
+          });
+        }
+      });
+    });
+  }
+
+  function startPurpleFlow(purpleUid) {
+    const purpleCard = findMyHandCard(purpleUid);
+    gatherTargets(purpleCard.defId, (purpleTargets) => {
+      send({ type: 'play_card', purpleUid, purpleTargets });
+    });
+  }
+
+  function askComboPurple(purples, cb) {
+    openModal('Добавить фиолетовую карту?', [
+      { label: 'Без фиолетовой карты', value: null },
+      ...purples.map((c) => ({ label: `${c.name}`, value: c.uid, sub: c.text })),
+    ], (val) => cb(val));
+  }
+
+  // ── Сбор целей по типу карты ──
+
+  const TARGET_SPECS = {
+    w_boleyushiy: [{ key: 'cardUid', label: 'Выберите вражескую карту (наложить вирус)', src: 'enemyCards' }],
+    w_stroitel: [{ key: 'wallTargetUid', label: 'Кому дать Стену (50%)? Пропустите, чтобы дать её самому Строителю', src: 'ownCards', optional: true }],
+    g_assassin: [{ key: 'cardUid', label: 'Выберите вражескую карту (яд + яд игроку)', src: 'enemyCards' }],
+    g_policeman: [{ key: 'cardUid', label: 'Выберите вражескую карту (вернуть в руку владельцу)', src: 'enemyCards' }],
+    g_antimiting: [
+      { key: 'opponentId', label: 'Выберите соперника', src: 'opponents' },
+      { key: 'cardUids', label: 'Если у него > 3 карт — выберите до 2 для возврата в руку', src: 'chosenOpponentCards', max: 2, optional: true },
+    ],
+    g_homyak: [{ key: 'cardUids', label: 'Выберите 2 вражеские карты (оглушить)', src: 'enemyCards', max: 2 }],
+    b_danilolog: [{ key: 'opponentId', label: 'Чью руку посмотреть?', src: 'opponents' }],
+    p_yad: [{ key: 'cardUids', label: 'Выберите 2 вражеские карты (яд 2/2)', src: 'enemyCards', max: 2 }],
+    p_kolotushka: [{ key: 'cardUid', label: 'Выберите белую/зелёную карту соперника (уничтожить)', src: 'enemyCards', filter: (c) => c.color === 'white' || c.color === 'green' }],
+    p_perchatka: [{ key: 'cardUid', label: 'Выберите зелёную/синюю карту соперника (забрать себе)', src: 'enemyCards', filter: (c) => c.color === 'green' || c.color === 'blue' }],
+    p_joker: [{ key: 'opponentId', label: 'У кого украсть карту из руки?', src: 'opponents' }],
+    p_zerkalo: [{ key: 'reviveDefId', label: 'Кого вернуть (75% HP)?', src: 'revivable', optional: true }],
+    p_ukol: [{ key: 'cardUid', label: 'Выберите вражескую карту (вирус)', src: 'enemyCards' }],
+    p_angel: [{ key: 'cardUid', label: 'Выберите свою карту на столе', src: 'ownCards' }],
+    p_ukus: [{ key: 'cardUid', label: 'Выберите вражескую карту, кроме жёлтой (4 урона)', src: 'enemyCards', filter: (c) => c.color !== 'yellow' }],
+  };
+
+  function enemyCardsList(filter) {
+    const list = [];
+    for (const p of state.players) {
+      if (p.id === myId || p.eliminated) continue;
+      for (const c of p.table) {
+        if (c.hp <= 0) continue;
+        if (filter && !filter(c)) continue;
+        list.push({ id: c.uid, label: `${c.name} (${p.name})`, ownerId: p.id });
+      }
+    }
+    return list;
+  }
+  function ownCardsList() {
+    const me = state.players.find((p) => p.id === myId);
+    return (me ? me.table : []).filter((c) => c.hp > 0).map((c) => ({ id: c.uid, label: c.name }));
+  }
+  function opponentsList() {
+    return state.players.filter((p) => p.id !== myId && !p.eliminated).map((p) => ({ id: p.id, label: p.name }));
+  }
+  function revivableList() {
+    return (state.me.revivableThisTurn || []).map((r) => ({ id: r.defId, label: r.name }));
+  }
+
+  function gatherTargets(defId, done) {
+    const spec = TARGET_SPECS[defId];
+    if (!spec) { done({}); return; }
+    const collected = {};
+    let i = 0;
+    function nextStep() {
+      if (i >= spec.length) { done(collected); return; }
+      const step = spec[i];
+      let options;
+      if (step.src === 'enemyCards') options = enemyCardsList(step.filter);
+      else if (step.src === 'ownCards' || step.src === 'ownCardsIncludingJustPlayed') options = ownCardsList();
+      else if (step.src === 'opponents') options = opponentsList();
+      else if (step.src === 'revivable') options = revivableList();
+      else if (step.src === 'chosenOpponentCards') {
+        const oppId = collected.opponentId;
+        const opp = state.players.find((p) => p.id === oppId);
+        options = opp ? opp.table.filter((c) => c.hp > 0).map((c) => ({ id: c.uid, label: c.name })) : [];
+        if (!opp || opp.table.length <= 3) { i++; nextStep(); return; }
+      }
+      options = options || [];
+      if (options.length === 0 && step.optional) { i++; nextStep(); return; }
+      if (options.length === 0) { i++; nextStep(); return; } // нет доступных целей — пропускаем шаг
+
+      if (step.max && step.max > 1) {
+        openMultiModal(step.label, options, step.max, step.optional, (picked) => {
+          collected[step.key] = picked;
+          if (step.key === 'cardUid' || step.key === 'cardUids') {
+            const firstOwner = options.find((o) => picked.includes(o.id));
+            if (firstOwner && firstOwner.ownerId) collected.opponentId = firstOwner.ownerId;
+          }
+          i++; nextStep();
+        });
+      } else {
+        openModal(step.label, options.map((o) => ({ label: o.label, value: o.id, sub: null })), (picked, opt) => {
+          collected[step.key] = picked;
+          if (opt && opt.ownerId) collected.opponentId = opt.ownerId;
+          i++; nextStep();
+        }, step.optional);
+      }
+    }
+    nextStep();
+  }
+
+  // ───────────────────────── Модалки ─────────────────────────
+
+  function openModal(title, options, cb, optional) {
+    const backdrop = el('modal-backdrop');
+    const modal = el('modal');
+    let html = `<h3>${escapeHtml(title)}</h3>`;
+    if (optional) html += `<button class="option-btn" data-idx="-1">— Пропустить —</button>`;
+    options.forEach((o, idx) => {
+      html += `<button class="option-btn" data-idx="${idx}">${escapeHtml(o.label)}${o.sub ? `<br><span style="color:var(--muted);font-size:11px">${escapeHtml(o.sub)}</span>` : ''}</button>`;
+    });
+    modal.innerHTML = html;
+    backdrop.style.display = 'flex';
+    modal.querySelectorAll('.option-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        backdrop.style.display = 'none';
+        const idx = parseInt(btn.dataset.idx, 10);
+        if (idx === -1) { cb(null, null); return; }
+        const opt = options[idx];
+        cb(opt.value !== undefined ? opt.value : opt.id, opt);
+      });
+    });
+  }
+
+  function openMultiModal(title, options, max, optional, cb) {
+    const backdrop = el('modal-backdrop');
+    const modal = el('modal');
+    const picked = [];
+    function draw() {
+      let html = `<h3>${escapeHtml(title)} (${picked.length}/${max})</h3>`;
+      options.forEach((o, idx) => {
+        html += `<button class="option-btn${picked.includes(o.id) ? ' picked' : ''}" data-idx="${idx}">${escapeHtml(o.label)}</button>`;
+      });
+      html += `<div class="row" style="margin-top:10px">`;
+      if (optional) html += `<button data-action="skip">Пропустить</button>`;
+      html += `<button class="primary" data-action="confirm" ${picked.length === 0 && !optional ? 'disabled' : ''}>Подтвердить</button>`;
+      html += `</div>`;
+      modal.innerHTML = html;
+      modal.querySelectorAll('.option-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.idx, 10);
+          const id = options[idx].id;
+          const pos = picked.indexOf(id);
+          if (pos >= 0) picked.splice(pos, 1);
+          else if (picked.length < max) picked.push(id);
+          draw();
+        });
+      });
+      modal.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        backdrop.style.display = 'none';
+        cb(picked);
+      });
+      const skipBtn = modal.querySelector('[data-action="skip"]');
+      if (skipBtn) skipBtn.addEventListener('click', () => { backdrop.style.display = 'none'; cb([]); });
+    }
+    draw();
+    backdrop.style.display = 'flex';
+  }
+
+  // ───────────────────────── Атака ─────────────────────────
+
+  function onTableCardClickForAttack(uid) {
+    const me = state.players.find((p) => p.id === myId);
+    const card = me.table.find((c) => c.uid === uid);
+    if (!card || card.hp <= 0) return;
+    if (card.statuses.stun) { showToast('Эта карта оглушена и не может атаковать.'); return; }
+    if (card.statuses.freeze) { showToast('Эта карта заморожена.'); return; }
+    if (card.atk <= 0) { showToast('У этой карты 0 атаки.'); return; }
+    chooseAttackTarget(uid);
+  }
+
+  function chooseAttackTarget(attackerUid) {
+    const opponents = state.players.filter((p) => p.id !== myId && !p.eliminated);
+    if (opponents.length === 1) {
+      resolveAttackAgainst(attackerUid, opponents[0].id);
+    } else {
+      openModal('Кого атаковать?', opponents.map((p) => ({ label: p.name, value: p.id })), (oppId) => {
+        if (oppId != null) resolveAttackAgainst(attackerUid, oppId);
+      });
+    }
+  }
+
+  function resolveAttackAgainst(attackerUid, defenderId) {
+    const defender = state.players.find((p) => p.id === defenderId);
+    const aliveCards = defender.table.filter((c) => c.hp > 0);
+    if (aliveCards.length === 0) {
+      send({ type: 'attack', attackerUid, defenderId });
+      return;
+    }
+    // Клиент присылает все живые карты соперника — сервер сам применит приоритеты
+    // и отклонит недопустимую цель, если игрок ошибётся.
+    openModal('Выберите цель на столе соперника', aliveCards.map((c) => ({
+      label: `${c.name} (❤️${c.hp}/${c.maxHp} ⚔️${c.atk})${c.priority ? ' — Приоритет ' + c.priority : ''}${c.evasive ? ' — неуловим(а)' : ''}`,
+      value: c.uid,
+    })), (targetUid) => {
+      if (targetUid) send({ type: 'attack', attackerUid, defenderId, targetUid });
+    });
+  }
+
+  // ───────────────────────── Панель управления ─────────────────────────
+
+  function renderControls() {
+    const controls = el('controls');
+    const hint = el('controls-hint');
+    const buttons = el('controls-buttons');
+    buttons.innerHTML = '';
+
+    if (state.phase === 'action' && isMyActionTurn()) {
+      controls.style.display = 'block';
+      hint.textContent = 'Ваш ход — фаза действия. Нажмите на карту в руке, чтобы сыграть её, или пропустите.';
+      const passBtn = document.createElement('button');
+      passBtn.textContent = 'Пропустить действие';
+      passBtn.onclick = () => send({ type: 'pass_action' });
+      buttons.appendChild(passBtn);
+      if (state.me.canActivateJudge) {
+        const judgeBtn = document.createElement('button');
+        judgeBtn.textContent = 'Судья: вернуть фиолетовую карту';
+        judgeBtn.onclick = () => send({ type: 'activate_judge' });
+        buttons.appendChild(judgeBtn);
+      }
+    } else if (state.phase === 'attack' && isMyAttackTurn()) {
+      controls.style.display = 'block';
+      const me = state.players.find((p) => p.id === myId);
+      const hasAliveCard = me.table.some((c) => c.hp > 0);
+      hint.textContent = hasAliveCard
+        ? 'Ваш ход — фаза атаки. Нажмите на свою карту на столе, чтобы атаковать ей.'
+        : 'На столе нет карт — можете атаковать сами (1 урон) или пропустить.';
+      if (!hasAliveCard) {
+        const selfBtn = document.createElement('button');
+        selfBtn.textContent = 'Атаковать самому (1 урон)';
+        selfBtn.onclick = () => chooseAttackTarget('SELF');
+        buttons.appendChild(selfBtn);
+      }
+      const skipBtn = document.createElement('button');
+      skipBtn.textContent = 'Не атаковать в этот ход';
+      skipBtn.onclick = () => send({ type: 'skip_attack' });
+      buttons.appendChild(skipBtn);
+    } else {
+      controls.style.display = 'none';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+</script>
+</body>
+</html>
