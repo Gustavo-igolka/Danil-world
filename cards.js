@@ -17,7 +17,7 @@ const CARDS = {
   },
   w_sudya: {
     id: 'w_sudya', name: 'Судья', color: 'white', hp: 2, atk: 1,
-    text: 'Один раз за игру (вместо обычной выкладки): верните 1 вашу сыгранную фиолетовую карту из сброса в руку.',
+    text: 'При выходе: выдаёт вам в руку фиолетовую карту «Орест».',
   },
   w_boleyushiy: {
     id: 'w_boleyushiy', name: 'Болеющий', color: 'white', hp: 3, atk: 1,
@@ -34,6 +34,10 @@ const CARDS = {
   w_ribak: {
     id: 'w_ribak', name: 'Рыбак', color: 'white', hp: 1, atk: 3,
     text: 'Пока жив: все ваши зелёные карты имеют +1 HP и блокируют одну (первую) атаку по себе.',
+  },
+  w_sniper: {
+    id: 'w_sniper', name: 'Снайпер', color: 'white', hp: 2, atk: 2, sniper: true,
+    text: 'Меткий: игнорирует все приоритеты и неуловимость. Может бить любую цель, кроме неуязвимых.',
   },
 
   // ───────────────── ЗЕЛЁНЫЕ ─────────────────
@@ -61,6 +65,10 @@ const CARDS = {
     id: 'g_vampire', name: 'Вампир', color: 'green', hp: 3, atk: 4,
     text: 'После атаки лечит себя на 1 HP.',
   },
+  g_rikoshet: {
+    id: 'g_rikoshet', name: 'Рикошетер', color: 'green', hp: 2, atk: 2,
+    text: 'При атаке: наносит 2 урона не только цели, но и соседней вражеской карте (если есть).',
+  },
 
   // ───────────────── СИНИЕ ─────────────────
   b_tank: {
@@ -69,7 +77,7 @@ const CARDS = {
   },
   b_soldier: {
     id: 'b_soldier', name: 'Солдат Данил', color: 'blue', hp: 4, atk: 5,
-    text: 'Если выжил 1 ход после выхода — +4 HP (единоразово).',
+    text: 'Если выжил 1 ход после выхода — +2 HP (единоразово).',
   },
   b_plague: {
     id: 'b_plague', name: 'Чумной доктор', color: 'blue', hp: 3, atk: 2,
@@ -86,6 +94,10 @@ const CARDS = {
   b_maso: {
     id: 'b_maso', name: 'Мазохист', color: 'blue', hp: 7, atk: 1,
     text: 'ATK = количеству потерянных HP (макс. 4). При лечении бонус снижается.',
+  },
+  b_ucheniy: {
+    id: 'b_ucheniy', name: 'Учёный', color: 'blue', hp: 3, atk: 1,
+    text: 'Вместо атаки: заморозьте 1 вражескую карту на 1 ход.',
   },
 
   // ───────────────── ЖЁЛТЫЕ (боссы) ─────────────────
@@ -108,7 +120,7 @@ const CARDS = {
 
   // ───────────────── ТОКЕНЫ (не в колоде, только по эффектам) ─────────────────
   tok_dan: {
-    id: 'tok_dan', name: 'Дан', color: 'yellow', hp: 1, atk: 0, priority: 3, token: true,
+    id: 'tok_dan', name: 'Дан', color: 'yellow', hp: 3, atk: 0, priority: 2, token: true,
     text: 'Призванный прислужник Короля Данилов.',
   },
   tok_danil3: {
@@ -125,6 +137,8 @@ const CARDS = {
   p_ukol: { id: 'p_ukol', name: 'Укол', color: 'purple', text: 'Наложите вирус на 1 вражескую карту.' },
   p_angel: { id: 'p_angel', name: 'Ангел-хранитель', color: 'purple', text: 'Выберите свою карту. Если она умрёт — вернётся с ATK / 2 (округление вниз).' },
   p_ukus: { id: 'p_ukus', name: 'Укус', color: 'purple', text: 'Нанесите 4 урона любой вражеской карте (кроме жёлтой).' },
+  p_orest: { id: 'p_orest', name: 'Орест', color: 'purple', noDeck: true, text: 'Выберите карту (белую/зелёную/синюю) из вашего сброса — на 1 ход на стол выходит её копия, затем исчезает.' },
+  p_shutka: { id: 'p_shutka', name: 'Шутка!', color: 'purple', text: 'Сделайте одного игрока (можно себя) неуязвимым и оглушённым на 1 ход (он пропускает следующий ход).' },
 };
 
 const DECK_COUNTS = {
@@ -138,6 +152,7 @@ function buildMainDeckDefIds() {
   for (const c of Object.values(CARDS)) {
     if (c.token) continue;
     if (c.color === 'yellow') continue;
+    if (c.noDeck) continue;
     const copies = DECK_COUNTS[c.color] || 1;
     for (let i = 0; i < copies; i++) ids.push(c.id);
   }

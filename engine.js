@@ -7,9 +7,15 @@
 //  - Порядок применения защиты при уроне: Рыбак-блок (полный блок, разовый) →
 //    Стена (50%) → вычитание из HP → отражение (Палка) считается отдельно от
 //    исходного урона, не уменьшает его.
-//  - «Судья» и активация способностей, которые не являются картой на столе,
-//    занимают всю фазу действия (нельзя в тот же ход ещё и выложить карту).
+//  - Оглушение/заморозка снимаются в КОНЦЕ хода владельца карты (не в начале) —
+//    иначе эффект не успевал бы никого заблокировать (баг версии 1.0).
+//  - «Судья»: при выходе выдаёт в руку фиолетовую карту «Орест» (переработано
+//    в 1.1 — раньше была невнятная механика «раз за игру»).
 //  - Атака "самим собой", когда стол пуст — доступна каждый ход, база 1 урона.
+//  - «Учёный» вместо атаки замораживает любую вражескую карту (без приоритетов —
+//    это не атака, а отдельная способность).
+//  - «Рикошетер»: «соседняя» карта — следующая по позиции в массиве стола
+//    соперника (или предыдущая, если цель была последней).
 
 const { CARDS, buildMainDeckDefIds, buildBossDeckDefIds } = require('./cards');
 
@@ -54,10 +60,11 @@ function makeCardInstance(defId, ownerId) {
 }
 
 class Player {
-  constructor(id, ws, name) {
+  constructor(id, ws, name, token) {
     this.id = id;
     this.ws = ws;
     this.name = name;
+    this.token = token;
     this.hp = 100;
     this.maxHp = 100;
     this.hand = [];      // card instances (hidden from others)
@@ -65,12 +72,17 @@ class Player {
     this.eliminated = false;
     this.connected = true;
     this.bossChoices = null; // pending {a,b} defIds during setup
-    this.judgeUsed = false;
     this.purpleDiscard = []; // defIds of purple cards this player has played
+    this.discardPile = [];   // defIds of this player's white/green/blue cards that died (для Ореста)
     this.nextPlayBuff = { atk: 0, hp: 0 };
     this.playerPoison = null; // { turnsLeft, dmg }
+    this.effectTurns = { invuln: 0, stun: 0 }; // игрок целиком (напр. «Шутка!»)
     this.diedThisTurn = [];   // card instances (snapshot) that died on player's own most recent turn
   }
+}
+
+function randomToken() {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
 class Game {
@@ -96,23 +108,63 @@ class Game {
 
   addPlayer(ws, name) {
     const id = this._nextPlayerId++;
-    const p = new Player(id, ws, name || `Игрок ${id}`);
+    const token = randomToken();
+    const p = new Player(id, ws, name || `Игрок ${id}`, token);
     this.players.set(id, p);
     this.addLog(`${p.name} присоединился к игре.`);
     return p;
   }
 
+  findPlayerByToken(token) {
+    if (!token) return null;
+    for (const p of this.players.values()) if (p.token === token) return p;
+    return null;
+  }
+
+  reconnectPlayer(token, ws) {
+    const p = this.findPlayerByToken(token);
+    if (!p) return null;
+    p.ws = ws;
+    p.connected = true;
+    this.addLog(`${p.name} снова на связи.`);
+    return p;
+  }
+
   removePlayer(id) {
+    // Разрыв соединения (не обязательно намеренный выход) — держим место в игре,
+    // чтобы можно было переподключиться той же вкладкой/токеном после перезагрузки.
     const p = this.players.get(id);
     if (!p) return;
-    if (this.phase === 'lobby') {
+    p.connected = false;
+    this.addLog(`⚠️ ${p.name} отключился. Игра продолжается, можно переподключиться.`);
+  }
+
+  leaveGame(id) {
+    // Осознанный выход игрока — вычищаем его из игры насовсем.
+    const p = this.players.get(id);
+    if (!p) return { error: 'Игрок не найден.' };
+    if (this.phase === 'lobby' || this.phase === 'boss_pick') {
       this.players.delete(id);
       this.order = this.order.filter((x) => x !== id);
-      this.addLog(`${p.name} покинул лобби.`);
-    } else {
-      p.connected = false;
-      this.addLog(`${p.name} отключился.`);
+      this.addLog(`${p.name} покинул(а) лобби.`);
+      return { ok: true };
     }
+    if (!p.eliminated) {
+      p.eliminated = true;
+      p.hp = 0;
+      for (const c of p.table) this.returnCardToDeck(c);
+      for (const c of p.hand) this.returnCardToDeck(c);
+      p.table = [];
+      p.hand = [];
+      this.addLog(`🚪 ${p.name} покидает игру.`);
+      if (this.currentPlayer() && this.currentPlayer().id === id) {
+        this.checkEliminations();
+        if (this.phase !== 'ended') this.endTurn();
+      } else {
+        this.checkEliminations();
+      }
+    }
+    return { ok: true };
   }
 
   alivePlayers() {
@@ -215,6 +267,17 @@ class Game {
     }
     const player = this.currentPlayer();
     if (!player) return;
+
+    if (player.effectTurns.stun > 0) {
+      this.addLog(`😵 ${player.name} оглушён(а) («Шутка!») и пропускает весь ход.`);
+      player.effectTurns.stun--;
+      if (player.effectTurns.invuln > 0) player.effectTurns.invuln--;
+      this.advanceTurnIndex();
+      if (this.phase === 'ended') return;
+      this.beginTurn();
+      return;
+    }
+
     this.phase = 'draw';
     player.diedThisTurn = [];
 
@@ -246,16 +309,8 @@ class Game {
       }
       if (card.hp <= 0) { this.handleCardDeath(card); continue; }
 
-      // заморозка — снятие и разовый бонус
-      if (card.statuses.freeze > 0) {
-        card.statuses.freeze--;
-        if (card.statuses.freeze === 0) {
-          card.hp += 1; card.maxHp += 1; card.atk += 1;
-          this.addLog(`${def.name} разморожен(а): +1 ко всем характеристикам.`);
-        }
-      }
-      // оглушение — тикает в начале хода владельца
-      if (card.statuses.stun > 0) card.statuses.stun--;
+      // заморозка и оглушение теперь снимаются в конце хода владельца (см. endTurn),
+      // чтобы эффект реально блокировал карту в течение её «одного хода».
       if (card.statuses.invuln > 0) card.statuses.invuln--;
 
       // рост (Обычный Данил)
@@ -316,6 +371,23 @@ class Game {
       this.addLog(`Медик лечит все ваши карты на 1 HP.`);
     }
 
+    // оглушение/заморозка снимаются здесь — карта уже «отходила» этот ход под эффектом
+    for (const card of player.table) {
+      if (card.hp <= 0) continue;
+      if (card.statuses.stun > 0) card.statuses.stun--;
+      if (card.statuses.freeze > 0) {
+        card.statuses.freeze--;
+        if (card.statuses.freeze === 0) {
+          card.hp += 1; card.maxHp += 1; card.atk += 1;
+          this.addLog(`${CARDS[card.defId].name} разморожен(а): +1 ко всем характеристикам.`);
+        }
+      }
+    }
+    // «Орест» — временная копия, живёт ровно 1 ход
+    const before = player.table.length;
+    player.table = player.table.filter((c) => !c.oneTurnToken);
+    if (player.table.length < before) this.addLog(`Временная копия Ореста исчезает.`);
+
     this.checkEliminations();
     if (this.phase === 'ended') return;
 
@@ -356,6 +428,10 @@ class Game {
 
   damagePlayer(player, amount, sourceLabel, unblockable) {
     if (amount <= 0) return;
+    if (player.effectTurns.invuln > 0 && !unblockable) {
+      this.addLog(`${player.name} неуязвим(а) («Шутка!») — урон не проходит.`);
+      return;
+    }
     player.hp = Math.max(0, player.hp - amount);
     this.addLog(`${player.name} получает ${amount} урона${sourceLabel ? ' (' + sourceLabel + ')' : ''}. HP: ${player.hp}/${player.maxHp}`);
   }
@@ -450,7 +526,10 @@ class Game {
       this.addLog(`Инфицированный призывает Обычного Данила (3 ур.) перед смертью.`);
     }
 
-    if (!def.token && owner) this.discard.push(card.defId);
+    if (!def.token && owner) {
+      this.discard.push(card.defId);
+      if (def.color !== 'yellow') owner.discardPile.push(card.defId);
+    }
   }
 
   cleanseAll(player) {
@@ -491,7 +570,7 @@ class Game {
   // ─────────────────────────── TARGETING ───────────────────────────
 
   getValidTargets(attackerCard, defenderPlayer) {
-    const isSniperAttacker = false; // текущий набор карт не содержит Снайпера (DLC)
+    const isSniperAttacker = !!(attackerCard && CARDS[attackerCard.defId].sniper);
     const alive = defenderPlayer.table.filter((c) => c.hp > 0 && c.statuses.invuln <= 0);
     if (alive.length === 0) {
       return { mode: 'player' };
@@ -563,6 +642,12 @@ class Game {
   runOnPlay(player, card, targets) {
     const def = CARDS[card.defId];
     switch (card.defId) {
+      case 'w_sudya': {
+        const orest = makeCardInstance('p_orest', player.id);
+        player.hand.push(orest);
+        this.addLog(`Судья выдаёт вам фиолетовую карту «Орест».`);
+        break;
+      }
       case 'w_boleyushiy': {
         const t = this.resolveCardTarget(targets);
         if (t) { t.statuses.virus = true; this.addLog(`Вирус на ${CARDS[t.defId].name}.`); }
@@ -667,22 +752,6 @@ class Game {
     return null;
   }
 
-  activateJudge(player) {
-    if (this.phase !== 'action') return { error: 'Сейчас не фаза действия.' };
-    if (this.currentPlayer().id !== player.id) return { error: 'Не ваш ход.' };
-    const judge = player.table.find((c) => c.defId === 'w_sudya' && c.hp > 0);
-    if (!judge) return { error: 'У вас нет Судьи на столе.' };
-    if (judge._judgeUsed) return { error: 'Судья уже использовал способность.' };
-    if (player.purpleDiscard.length === 0) return { error: 'В вашем сбросе нет сыгранных фиолетовых карт.' };
-    const defId = player.purpleDiscard.pop();
-    const card = makeCardInstance(defId, player.id);
-    player.hand.push(card);
-    judge._judgeUsed = true;
-    this.addLog(`Судья возвращает ${CARDS[defId].name} из сброса в руку.`);
-    this.phase = 'attack';
-    return { ok: true };
-  }
-
   passAction(player) {
     if (this.phase !== 'action') return { error: 'Сейчас не фаза действия.' };
     if (this.currentPlayer().id !== player.id) return { error: 'Не ваш ход.' };
@@ -773,6 +842,30 @@ class Game {
         }
         break;
       }
+      case 'p_orest': {
+        const defId = targets.sourceDefId;
+        const valid = defId && player.discardPile.includes(defId) &&
+          ['white', 'green', 'blue'].includes(CARDS[defId] && CARDS[defId].color);
+        if (valid) {
+          const tok = makeCardInstance(defId, player.id);
+          tok.oneTurnToken = true;
+          tok.enteredRound = this.round;
+          player.table.push(tok);
+          this.addLog(`Орест на 1 ход становится копией «${CARDS[defId].name}».`);
+        } else {
+          this.addLog(`Орест: подходящей карты в вашем сбросе нет.`);
+        }
+        break;
+      }
+      case 'p_shutka': {
+        const target = this.players.get(targets.targetPlayerId);
+        if (target && !target.eliminated) {
+          target.effectTurns.invuln = Math.max(target.effectTurns.invuln, 1);
+          target.effectTurns.stun = Math.max(target.effectTurns.stun, 1);
+          this.addLog(`«Шутка!»: ${target.name} неуязвим(а) и оглушён(а) на 1 ход.`);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -815,7 +908,23 @@ class Game {
     } else {
       const target = validity.options.find((c) => c.uid === targetUid);
       if (!target) return { error: 'Недопустимая цель по правилам приоритета.' };
+
+      // Рикошетер — определяем «соседа» ДО удара, т.к. цель может погибнуть и уйти со стола
+      let rikoshetNeighbor = null;
+      if (attackerCard && attackerCard.defId === 'g_rikoshet') {
+        const idx = defender.table.findIndex((c) => c.uid === target.uid);
+        if (idx >= 0) {
+          if (defender.table[idx + 1] && defender.table[idx + 1].hp > 0) rikoshetNeighbor = defender.table[idx + 1];
+          else if (defender.table[idx - 1] && defender.table[idx - 1].hp > 0) rikoshetNeighbor = defender.table[idx - 1];
+        }
+      }
+
       this.damageCard(target, atkValue, attackerCard ? CARDS[attackerCard.defId].name : player.name, attackerCard);
+
+      if (rikoshetNeighbor && rikoshetNeighbor.hp > 0) {
+        this.addLog(`Рикошет задевает соседнюю карту.`);
+        this.damageCard(rikoshetNeighbor, 2, 'рикошет');
+      }
     }
 
     if (attackerCard) {
@@ -845,6 +954,22 @@ class Game {
     return { ok: true };
   }
 
+  useScientistFreeze(player, { attackerUid, targetUid }) {
+    if (this.phase !== 'attack') return { error: 'Сейчас не фаза атаки.' };
+    if (this.currentPlayer().id !== player.id) return { error: 'Не ваш ход.' };
+    const scientist = player.table.find((c) => c.uid === attackerUid && c.defId === 'b_ucheniy' && c.hp > 0);
+    if (!scientist) return { error: 'Это не Учёный или он не найден на столе.' };
+    if (scientist.statuses.stun > 0 || scientist.statuses.freeze > 0) return { error: 'Учёный не может сейчас использовать способность.' };
+    const target = this.findAnyCard(targetUid);
+    if (!target || target.ownerId === player.id) return { error: 'Нужна вражеская карта.' };
+    target.statuses.freeze = Math.max(target.statuses.freeze, 1);
+    this.addLog(`Учёный замораживает ${CARDS[target.defId].name} на 1 ход.`);
+    this.checkEliminations();
+    if (this.phase === 'ended') return { ok: true };
+    this.endTurn();
+    return { ok: true };
+  }
+
   // ─────────────────────────── STATE FOR CLIENT ───────────────────────────
 
   publicCard(card) {
@@ -852,7 +977,7 @@ class Game {
     return {
       uid: card.uid, defId: card.defId, name: def.name, color: def.color,
       hp: card.hp, maxHp: card.maxHp, atk: this.effectiveAtk(card),
-      priority: def.priority || null, evasive: !!def.evasive,
+      priority: def.priority || null, evasive: !!def.evasive, sniper: !!def.sniper,
       statuses: {
         poison: card.statuses.poison ? { ...card.statuses.poison } : null,
         virus: card.statuses.virus,
@@ -875,6 +1000,7 @@ class Game {
       isMe: p.id === viewerId,
       hasPendingBossChoice: !!p.bossChoices,
       playerPoison: p.playerPoison,
+      effectTurns: p.effectTurns,
     }));
     const me = this.players.get(viewerId);
     return {
@@ -893,12 +1019,12 @@ class Game {
           a: { defId: me.bossChoices.a, name: CARDS[me.bossChoices.a].name, text: CARDS[me.bossChoices.a].text, hp: CARDS[me.bossChoices.a].hp, atk: CARDS[me.bossChoices.a].atk },
           b: { defId: me.bossChoices.b, name: CARDS[me.bossChoices.b].name, text: CARDS[me.bossChoices.b].text, hp: CARDS[me.bossChoices.b].hp, atk: CARDS[me.bossChoices.b].atk },
         } : null,
-        canActivateJudge: this.phase === 'action' && this.order[this.turnIndex] === me.id &&
-          me.table.some((c) => c.defId === 'w_sudya' && c.hp > 0 && !c._judgeUsed) &&
-          me.purpleDiscard.length > 0,
         revivableThisTurn: me.diedThisTurn
           .filter((d) => CARDS[d.defId].color === 'white' || CARDS[d.defId].color === 'blue')
           .map((d) => ({ defId: d.defId, name: CARDS[d.defId].name })),
+        discardPile: [...new Set(me.discardPile)]
+          .filter((defId) => ['white', 'green', 'blue'].includes(CARDS[defId].color))
+          .map((defId) => ({ defId, name: CARDS[defId].name })),
       } : null,
     };
   }

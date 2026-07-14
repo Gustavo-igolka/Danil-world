@@ -167,6 +167,10 @@
 <body>
   <h1>🎴 Мир Данилов 2</h1>
   <div id="status" class="disconnected">Подключение...</div>
+  <div id="top-actions" style="display:none; justify-content:center; gap:8px; margin-bottom:10px">
+    <button id="hints-btn">📖 Подсказки</button>
+    <button id="leave-btn" class="danger">🚪 Выйти из игры</button>
+  </div>
 
   <!-- Экран входа -->
   <div id="lobby-join" class="card-box">
@@ -227,6 +231,7 @@
 
   let ws = null;
   let myId = null;
+  let myToken = localStorage.getItem('danilov2_token') || null;
   let state = null; // последнее состояние от сервера
 
   const statusEl = document.getElementById('status');
@@ -235,13 +240,42 @@
   function connect() {
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${protocol}://${location.host}`);
-    ws.onopen = () => { statusEl.textContent = 'Подключено'; statusEl.className = 'connected'; };
-    ws.onclose = () => { statusEl.textContent = 'Соединение потеряно — обновите страницу'; statusEl.className = 'disconnected'; };
+    ws.onopen = () => {
+      statusEl.textContent = 'Подключено';
+      statusEl.className = 'connected';
+      if (myToken) {
+        statusEl.textContent = 'Восстанавливаем ваше место в игре...';
+        ws.send(JSON.stringify({ type: 'rejoin', token: myToken }));
+      }
+    };
+    ws.onclose = () => {
+      statusEl.textContent = 'Соединение потеряно — переподключаемся...';
+      statusEl.className = 'disconnected';
+      setTimeout(connect, 1500);
+    };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === 'welcome') { myId = data.id; }
-      else if (data.type === 'state') { state = data; render(); }
-      else if (data.type === 'error') { showToast(data.message); }
+      if (data.type === 'welcome') {
+        myId = data.id;
+        if (data.token) { myToken = data.token; localStorage.setItem('danilov2_token', myToken); }
+        el('top-actions').style.display = 'flex';
+      } else if (data.type === 'state') {
+        state = data; render();
+      } else if (data.type === 'left_game') {
+        myId = null; myToken = null;
+        localStorage.removeItem('danilov2_token');
+        el('top-actions').style.display = 'none';
+        location.reload();
+      } else if (data.type === 'error') {
+        if (data.message === 'REJOIN_FAILED') {
+          myToken = null;
+          localStorage.removeItem('danilov2_token');
+          statusEl.textContent = 'Не удалось восстановить сессию — присоединитесь заново';
+          statusEl.className = 'connected';
+        } else {
+          showToast(data.message);
+        }
+      }
     };
   }
   connect();
@@ -267,6 +301,37 @@
   el('name-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('join-btn').click(); });
 
   el('start-btn').addEventListener('click', () => send({ type: 'start_game' }));
+  el('leave-btn').addEventListener('click', () => {
+    if (confirm('Точно выйти из игры? Это освободит ваше место.')) send({ type: 'leave_game' });
+  });
+  el('hints-btn').addEventListener('click', openHintsBook);
+
+  let cardsInfoCache = null;
+  async function openHintsBook() {
+    if (!cardsInfoCache) {
+      try {
+        const r = await fetch('/cards-info.json');
+        cardsInfoCache = await r.json();
+      } catch (e) { cardsInfoCache = []; }
+    }
+    const groups = { white: '⚪ Белые', green: '🟢 Зелёные', blue: '🔵 Синие', yellow: '🟡 Жёлтые (боссы)', purple: '🟣 Фиолетовые' };
+    let html = '<h3>📖 Книга подсказок</h3>';
+    for (const [color, title] of Object.entries(groups)) {
+      const cards = cardsInfoCache.filter((c) => c.color === color);
+      if (!cards.length) continue;
+      html += `<div style="margin-top:10px;font-weight:600;color:var(--${color === 'white' ? 'white-c' : color + '-c'})">${title}</div>`;
+      cards.forEach((c) => {
+        html += `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <b>${escapeHtml(c.name)}</b> ${c.hp != null ? `<span style="color:var(--muted);font-size:12px">❤️${c.hp} ⚔️${c.atk}</span>` : ''}
+          <div style="font-size:12.5px;color:var(--muted)">${escapeHtml(c.text)}</div>
+        </div>`;
+      });
+    }
+    html += '<button class="primary" id="hints-close" style="width:100%;margin-top:12px">Закрыть</button>';
+    el('modal').innerHTML = html;
+    el('modal-backdrop').style.display = 'flex';
+    el('hints-close').addEventListener('click', () => { el('modal-backdrop').style.display = 'none'; });
+  }
 
   // ───────────────────────── Рендер ─────────────────────────
 
@@ -382,10 +447,11 @@
       handHtml = `<div class="hint">Карт в руке: ${p.handCount}</div>`;
     }
     const poison = p.playerPoison ? ` ☠️×${p.playerPoison.turnsLeft}` : '';
+    const shutka = (p.effectTurns && (p.effectTurns.invuln > 0 || p.effectTurns.stun > 0)) ? ' 🛡️😵' : '';
     return `
       <div class="${cls.join(' ')}">
         <div class="player-head">
-          <span class="name">${escapeHtml(p.name)}${isMe ? ' (вы)' : ''}${p.eliminated ? ' — выбыл' : ''}${poison}</span>
+          <span class="name">${escapeHtml(p.name)}${isMe ? ' (вы)' : ''}${p.eliminated ? ' — выбыл' : ''}${poison}${shutka}</span>
           <span class="hp-num">${p.hp}/${p.maxHp} HP</span>
         </div>
         <div class="hp-bar-outer"><div class="hp-bar-inner${hpPct < 30 ? ' low' : ''}" style="width:${hpPct}%"></div></div>
@@ -404,7 +470,7 @@
     if (selection.mainCardUid === c.uid || selection.purpleCardUid === c.uid) cls.push('selected');
 
     const statuses = STATUS_ICONS.filter(([k]) => c.statuses[k]).map(([, icon]) => icon).join(' ');
-    const prio = c.priority ? `<span class="prio">П${c.priority}</span>` : (c.evasive ? `<span class="prio">👁️</span>` : '');
+    const prio = c.priority ? `<span class="prio">П${c.priority}</span>` : (c.evasive ? `<span class="prio">👁️</span>` : (c.sniper ? `<span class="prio">🎯</span>` : ''));
     return `
       <div class="${cls.join(' ')}" data-uid="${c.uid}" data-inhand="${!!inHand}" title="${escapeHtml(c.text || '')}">
         ${prio}
@@ -420,28 +486,67 @@
   // ───────────────────────── Выбор действия ─────────────────────────
 
   let selection = { mainCardUid: null, purpleCardUid: null, attackerUid: null };
+  let pendingAction = null; // { type: 'play', uid } | { type: 'attack', uid }
 
   function attachCardHandlers() {
     document.querySelectorAll('.mini-card.clickable').forEach((elm) => {
       elm.addEventListener('click', () => {
         const uid = elm.dataset.uid;
         const inHand = elm.dataset.inhand === 'true';
-        if (inHand && isMyActionTurn()) onHandCardClick(uid);
-        else if (!inHand && isMyAttackTurn()) onTableCardClickForAttack(uid);
+        if (inHand && isMyActionTurn()) stagePlay(uid);
+        else if (!inHand && isMyAttackTurn()) stageAttack(uid);
       });
     });
   }
 
+  function stagePlay(uid) {
+    pendingAction = { type: 'play', uid };
+    selection.mainCardUid = uid;
+    render();
+  }
+  function stageAttack(uid) {
+    const me = state.players.find((p) => p.id === myId);
+    const card = me.table.find((c) => c.uid === uid);
+    if (!card || card.hp <= 0) return;
+    if (card.statuses.stun) { showToast('Эта карта оглушена и не может атаковать.'); return; }
+    if (card.statuses.freeze) { showToast('Эта карта заморожена.'); return; }
+    pendingAction = { type: 'attack', uid };
+    selection.attackerUid = uid;
+    render();
+  }
+  function cancelPending() {
+    pendingAction = null;
+    selection = { mainCardUid: null, purpleCardUid: null, attackerUid: null };
+    render();
+  }
+
   function findMyHandCard(uid) { return state.me.hand.find((c) => c.uid === uid); }
 
-  function onHandCardClick(uid) {
+  function confirmPendingPlay() {
+    if (!pendingAction || pendingAction.type !== 'play') return;
+    const uid = pendingAction.uid;
+    pendingAction = null;
     const card = findMyHandCard(uid);
-    if (!card) return;
-    if (card.color === 'purple') {
-      startPurpleFlow(uid, null);
-    } else {
-      startMainCardFlow(uid);
-    }
+    if (!card) { selection.mainCardUid = null; render(); return; }
+    if (card.color === 'purple') startPurpleFlow(uid);
+    else startMainCardFlow(uid);
+  }
+
+  function confirmPendingAttack() {
+    if (!pendingAction || pendingAction.type !== 'attack') return;
+    const uid = pendingAction.uid;
+    pendingAction = null;
+    chooseAttackTarget(uid);
+  }
+
+  function confirmScientistFreeze() {
+    if (!pendingAction || pendingAction.type !== 'attack') return;
+    const attackerUid = pendingAction.uid;
+    pendingAction = null;
+    gatherTargets('b_ucheniy_freeze', (targets) => {
+      send({ type: 'scientist_freeze', attackerUid, targetUid: targets.cardUid });
+      selection.attackerUid = null;
+    });
   }
 
   function startMainCardFlow(mainUid) {
@@ -500,6 +605,9 @@
     p_ukol: [{ key: 'cardUid', label: 'Выберите вражескую карту (вирус)', src: 'enemyCards' }],
     p_angel: [{ key: 'cardUid', label: 'Выберите свою карту на столе', src: 'ownCards' }],
     p_ukus: [{ key: 'cardUid', label: 'Выберите вражескую карту, кроме жёлтой (4 урона)', src: 'enemyCards', filter: (c) => c.color !== 'yellow' }],
+    p_orest: [{ key: 'sourceDefId', label: 'Кого скопировать на 1 ход (из вашего сброса)?', src: 'discardPile' }],
+    p_shutka: [{ key: 'targetPlayerId', label: 'На кого наложить неуязвимость + оглушение на 1 ход?', src: 'allPlayers' }],
+    b_ucheniy_freeze: [{ key: 'cardUid', label: 'Кого заморозить на 1 ход?', src: 'enemyCards' }],
   };
 
   function enemyCardsList(filter) {
@@ -521,8 +629,14 @@
   function opponentsList() {
     return state.players.filter((p) => p.id !== myId && !p.eliminated).map((p) => ({ id: p.id, label: p.name }));
   }
+  function allPlayersList() {
+    return state.players.filter((p) => !p.eliminated).map((p) => ({ id: p.id, label: p.name + (p.id === myId ? ' (вы)' : '') }));
+  }
   function revivableList() {
     return (state.me.revivableThisTurn || []).map((r) => ({ id: r.defId, label: r.name }));
+  }
+  function discardPileList() {
+    return (state.me.discardPile || []).map((r) => ({ id: r.defId, label: r.name }));
   }
 
   function gatherTargets(defId, done) {
@@ -537,7 +651,9 @@
       if (step.src === 'enemyCards') options = enemyCardsList(step.filter);
       else if (step.src === 'ownCards' || step.src === 'ownCardsIncludingJustPlayed') options = ownCardsList();
       else if (step.src === 'opponents') options = opponentsList();
+      else if (step.src === 'allPlayers') options = allPlayersList();
       else if (step.src === 'revivable') options = revivableList();
+      else if (step.src === 'discardPile') options = discardPileList();
       else if (step.src === 'chosenOpponentCards') {
         const oppId = collected.opponentId;
         const opp = state.players.find((p) => p.id === oppId);
@@ -578,6 +694,7 @@
     options.forEach((o, idx) => {
       html += `<button class="option-btn" data-idx="${idx}">${escapeHtml(o.label)}${o.sub ? `<br><span style="color:var(--muted);font-size:11px">${escapeHtml(o.sub)}</span>` : ''}</button>`;
     });
+    html += `<button data-idx="cancel" style="width:100%;margin-top:6px">✕ Отмена (не разыгрывать карту)</button>`;
     modal.innerHTML = html;
     backdrop.style.display = 'flex';
     modal.querySelectorAll('.option-btn').forEach((btn) => {
@@ -588,6 +705,10 @@
         const opt = options[idx];
         cb(opt.value !== undefined ? opt.value : opt.id, opt);
       });
+    });
+    modal.querySelector('[data-idx="cancel"]').addEventListener('click', () => {
+      backdrop.style.display = 'none';
+      cancelPending();
     });
   }
 
@@ -604,6 +725,7 @@
       if (optional) html += `<button data-action="skip">Пропустить</button>`;
       html += `<button class="primary" data-action="confirm" ${picked.length === 0 && !optional ? 'disabled' : ''}>Подтвердить</button>`;
       html += `</div>`;
+      html += `<button data-action="cancel" style="width:100%;margin-top:6px">✕ Отмена (не разыгрывать карту)</button>`;
       modal.innerHTML = html;
       modal.querySelectorAll('.option-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -621,22 +743,16 @@
       });
       const skipBtn = modal.querySelector('[data-action="skip"]');
       if (skipBtn) skipBtn.addEventListener('click', () => { backdrop.style.display = 'none'; cb([]); });
+      modal.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        backdrop.style.display = 'none';
+        cancelPending();
+      });
     }
     draw();
     backdrop.style.display = 'flex';
   }
 
   // ───────────────────────── Атака ─────────────────────────
-
-  function onTableCardClickForAttack(uid) {
-    const me = state.players.find((p) => p.id === myId);
-    const card = me.table.find((c) => c.uid === uid);
-    if (!card || card.hp <= 0) return;
-    if (card.statuses.stun) { showToast('Эта карта оглушена и не может атаковать.'); return; }
-    if (card.statuses.freeze) { showToast('Эта карта заморожена.'); return; }
-    if (card.atk <= 0) { showToast('У этой карты 0 атаки.'); return; }
-    chooseAttackTarget(uid);
-  }
 
   function chooseAttackTarget(attackerUid) {
     const opponents = state.players.filter((p) => p.id !== myId && !p.eliminated);
@@ -676,21 +792,51 @@
 
     if (state.phase === 'action' && isMyActionTurn()) {
       controls.style.display = 'block';
+      if (pendingAction && pendingAction.type === 'play') {
+        const card = findMyHandCard(pendingAction.uid);
+        hint.textContent = card ? `Играете: ${card.name}. Подтвердите или отмените.` : 'Карта уже не в руке.';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'primary';
+        okBtn.textContent = 'Играть эту карту';
+        okBtn.onclick = confirmPendingPlay;
+        buttons.appendChild(okBtn);
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '✕ Отмена';
+        cancelBtn.onclick = cancelPending;
+        buttons.appendChild(cancelBtn);
+        return;
+      }
       hint.textContent = 'Ваш ход — фаза действия. Нажмите на карту в руке, чтобы сыграть её, или пропустите.';
       const passBtn = document.createElement('button');
       passBtn.textContent = 'Пропустить действие';
       passBtn.onclick = () => send({ type: 'pass_action' });
       buttons.appendChild(passBtn);
-      if (state.me.canActivateJudge) {
-        const judgeBtn = document.createElement('button');
-        judgeBtn.textContent = 'Судья: вернуть фиолетовую карту';
-        judgeBtn.onclick = () => send({ type: 'activate_judge' });
-        buttons.appendChild(judgeBtn);
-      }
     } else if (state.phase === 'attack' && isMyAttackTurn()) {
       controls.style.display = 'block';
       const me = state.players.find((p) => p.id === myId);
       const hasAliveCard = me.table.some((c) => c.hp > 0);
+
+      if (pendingAction && pendingAction.type === 'attack') {
+        const card = me.table.find((c) => c.uid === pendingAction.uid);
+        hint.textContent = card ? `Атакующий: ${card.name}. Подтвердите или отмените.` : 'Карта уже недоступна.';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'primary';
+        okBtn.textContent = 'Атаковать';
+        okBtn.onclick = confirmPendingAttack;
+        buttons.appendChild(okBtn);
+        if (card && card.defId === 'b_ucheniy') {
+          const freezeBtn = document.createElement('button');
+          freezeBtn.textContent = 'Вместо атаки: заморозить';
+          freezeBtn.onclick = confirmScientistFreeze;
+          buttons.appendChild(freezeBtn);
+        }
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '✕ Отмена';
+        cancelBtn.onclick = cancelPending;
+        buttons.appendChild(cancelBtn);
+        return;
+      }
+
       hint.textContent = hasAliveCard
         ? 'Ваш ход — фаза атаки. Нажмите на свою карту на столе, чтобы атаковать ей.'
         : 'На столе нет карт — можете атаковать сами (1 урон) или пропустить.';

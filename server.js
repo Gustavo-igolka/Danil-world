@@ -8,6 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { Game } = require('./engine');
+const { CARDS } = require('./cards');
 
 const PORT = process.env.PORT || 8080;
 
@@ -25,9 +26,17 @@ function sendError(ws, message) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', message }));
 }
 
-// --- Простой статический сервер ---
+// --- Простой статический сервер + справочник карт ---
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 const server = http.createServer((req, res) => {
+  if (req.url === '/cards-info.json') {
+    const info = Object.values(CARDS)
+      .filter((c) => !c.token)
+      .map((c) => ({ id: c.id, name: c.name, color: c.color, hp: c.hp, atk: c.atk, text: c.text }));
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(info));
+    return;
+  }
   let filePath = req.url === '/' ? '/index.html' : req.url;
   filePath = path.join(__dirname, filePath.split('?')[0]);
   fs.readFile(filePath, (err, data) => {
@@ -53,12 +62,35 @@ wss.on('connection', (ws) => {
       if (game.phase !== 'lobby') { sendError(ws, 'Игра уже началась, дождитесь следующей партии.'); return; }
       player = game.addPlayer(ws, (msg.name || '').trim().slice(0, 24));
       sockets.set(player.id, ws);
-      ws.send(JSON.stringify({ type: 'welcome', id: player.id }));
+      ws.send(JSON.stringify({ type: 'welcome', id: player.id, token: player.token }));
+      broadcastState();
+      return;
+    }
+
+    // --- переподключение той же вкладкой/токеном после разрыва связи ---
+    if (msg.type === 'rejoin') {
+      if (player) return;
+      const rejoined = game.reconnectPlayer(msg.token, ws);
+      if (!rejoined) { sendError(ws, 'REJOIN_FAILED'); return; }
+      player = rejoined;
+      sockets.set(player.id, ws);
+      ws.send(JSON.stringify({ type: 'welcome', id: player.id, token: player.token }));
       broadcastState();
       return;
     }
 
     if (!player) { sendError(ws, 'Сначала подключитесь (join).'); return; }
+
+    // --- осознанный выход из игры ---
+    if (msg.type === 'leave_game') {
+      const result = game.leaveGame(player.id);
+      sockets.delete(player.id);
+      if (result && result.error) sendError(ws, result.error);
+      ws.send(JSON.stringify({ type: 'left_game' }));
+      player = null;
+      broadcastState();
+      return;
+    }
 
     let result;
     switch (msg.type) {
@@ -76,9 +108,6 @@ wss.on('connection', (ws) => {
           purpleTargets: msg.purpleTargets,
         });
         break;
-      case 'activate_judge':
-        result = game.activateJudge(player);
-        break;
       case 'pass_action':
         result = game.passAction(player);
         break;
@@ -87,6 +116,9 @@ wss.on('connection', (ws) => {
         break;
       case 'skip_attack':
         result = game.skipAttack(player);
+        break;
+      case 'scientist_freeze':
+        result = game.useScientistFreeze(player, { attackerUid: msg.attackerUid, targetUid: msg.targetUid });
         break;
       default:
         return;
