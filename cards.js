@@ -54,7 +54,7 @@ const CARDS = {
     text: 'При выходе: если у врага >3 карт на столе, верните 2 из них в руку.',
   },
   g_homyak: {
-    id: 'g_homyak', name: 'Хомяк', color: 'green', hp: 4, atk: 3,
+    id: 'g_homyak', name: 'Хомяк', color: 'green', hp: 3, atk: 3,
     text: 'При выходе: оглушите 2 вражеские карты.',
   },
   g_flagonosec: {
@@ -62,7 +62,7 @@ const CARDS = {
     text: 'При выходе: следующая выложенная вами карта получает +2 ATK.',
   },
   g_vampire: {
-    id: 'g_vampire', name: 'Вампир', color: 'green', hp: 3, atk: 4,
+    id: 'g_vampire', name: 'Вампир', color: 'green', hp: 3, atk: 3,
     text: 'После атаки лечит себя на 1 HP.',
   },
   g_rikoshet: {
@@ -76,7 +76,7 @@ const CARDS = {
     text: 'При выходе: следующая выложенная вами карта получает +3 HP.',
   },
   b_soldier: {
-    id: 'b_soldier', name: 'Солдат Данил', color: 'blue', hp: 4, atk: 5,
+    id: 'b_soldier', name: 'Солдат Данил', color: 'blue', hp: 4, atk: 4,
     text: 'Если выжил 1 ход после выхода — +2 HP (единоразово).',
   },
   b_plague: {
