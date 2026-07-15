@@ -99,6 +99,12 @@ class Game {
     this.winnerId = null;
     this.broadcast = broadcastFn; // callback(game) -> pushes state to all sockets
     this._nextPlayerId = 1;
+
+    // ── Таймер хода ──
+    this.TURN_SECONDS = 60; // сколько секунд даётся на фазу действия/атаки
+    this.turnTimer = null;
+    this.turnDeadline = null; // epoch ms, для отображения на клиенте
+    this.onAutoUpdate = null; // сервер подставляет сюда broadcastState()
   }
 
   addLog(msg) {
@@ -175,6 +181,37 @@ class Game {
     return this.players.get(this.order[this.turnIndex]);
   }
 
+  // ─────────────────────────── ТАЙМЕР ХОДА ───────────────────────────
+
+  clearTimer() {
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = null;
+    this.turnDeadline = null;
+  }
+
+  armTimer() {
+    this.clearTimer();
+    if (this.phase !== 'action' && this.phase !== 'attack') return;
+    this.turnDeadline = Date.now() + this.TURN_SECONDS * 1000;
+    this.turnTimer = setTimeout(() => this.handleTimeout(), this.TURN_SECONDS * 1000);
+    if (this.turnTimer.unref) this.turnTimer.unref();
+  }
+
+  handleTimeout() {
+    const player = this.currentPlayer();
+    this.turnTimer = null;
+    this.turnDeadline = null;
+    if (!player || this.phase === 'ended') return;
+    if (this.phase === 'action') {
+      this.addLog(`⏰ Время вышло — ${player.name} пропускает действие.`);
+      this.passAction(player);
+    } else if (this.phase === 'attack') {
+      this.addLog(`⏰ Время вышло — ${player.name} не атакует.`);
+      this.skipAttack(player);
+    }
+    if (this.onAutoUpdate) this.onAutoUpdate();
+  }
+
   // ─────────────────────────── SETUP ───────────────────────────
 
   startGame() {
@@ -239,14 +276,21 @@ class Game {
 
   drawCardInto(player) {
     if (this.deck.length === 0) {
-      if (this.discard.length === 0) return null; // нечего мешать
-      this.deck = shuffle(this.discard.splice(0).map((defId) => ({ defId })));
-      this.addLog('Колода опустела — сброс перемешан в новую колоду.');
+      return null; // колода одна на всю игру (с 1.2) — добора без пересдачи больше нет
     }
     const { defId } = this.deck.pop();
     const card = makeCardInstance(defId, player.id);
     player.hand.push(card);
     return card;
+  }
+
+  drawMultiple(player, count) {
+    let drawn = 0;
+    for (let i = 0; i < count; i++) {
+      if (this.drawCardInto(player)) drawn++;
+      else break;
+    }
+    return drawn;
   }
 
   // ─────────────────────────── TURN FLOW ───────────────────────────
@@ -255,6 +299,7 @@ class Game {
     if (this.phase === 'ended') return;
     if (this.alivePlayers().length <= 1) {
       this.phase = 'ended';
+      this.clearTimer();
       const alive = this.alivePlayers();
       this.winnerId = alive.length === 1 ? alive[0].id : null;
       return;
@@ -282,8 +327,9 @@ class Game {
     player.diedThisTurn = [];
 
     this.runTurnStartTriggers(player);
-    this.drawCardInto(player);
+    if (!this.drawCardInto(player)) this.addLog('Колода пуста — карт для добора больше не осталось.');
     this.phase = 'action';
+    this.armTimer();
     this.addLog(`Ход игрока ${player.name} (раунд ${this.round + 1}).`);
   }
 
@@ -345,17 +391,14 @@ class Game {
     if (this.turnIndex >= this.order.length) {
       this.turnIndex = 0;
       this.round++;
-      this.applyAcceleration();
     }
   }
 
-  applyAcceleration() {
-    if (this.round > 0 && this.round % 5 === 0) {
-      this.addLog(`⚡ Ускорение! Все игроки теряют 5 HP.`);
-      for (const p of this.alivePlayers()) {
-        this.damagePlayer(p, 5, 'ускорение', true);
-      }
-      this.checkEliminations();
+  applyTurnAttrition() {
+    // с 1.2: вместо разового «Ускорения» раз в 5 раундов — все участники
+    // теряют 2 HP после КАЖДОГО хода (своего или чужого), урон нельзя предотвратить.
+    for (const p of this.alivePlayers()) {
+      this.damagePlayer(p, 2, 'общее ослабление', true);
     }
   }
 
@@ -388,6 +431,9 @@ class Game {
     player.table = player.table.filter((c) => !c.oneTurnToken);
     if (player.table.length < before) this.addLog(`Временная копия Ореста исчезает.`);
 
+    this.addLog(`⚡ Общее ослабление: все участники теряют 2 HP.`);
+    this.applyTurnAttrition();
+
     this.checkEliminations();
     if (this.phase === 'ended') return;
 
@@ -412,6 +458,7 @@ class Game {
     const alive = this.alivePlayers();
     if (alive.length <= 1 && this.players.size > 1) {
       this.phase = 'ended';
+      this.clearTimer();
       this.winnerId = alive.length === 1 ? alive[0].id : null;
       this.addLog(alive.length === 1 ? `🏆 ${alive[0].name} побеждает!` : 'Игра окончена вничью.');
     }
@@ -617,6 +664,7 @@ class Game {
     if (purpleCard) this.resolvePurple(player, purpleCard, purpleTargets || {});
 
     this.phase = 'attack';
+    this.armTimer();
     return { ok: true };
   }
 
@@ -723,6 +771,19 @@ class Game {
         }
         break;
       }
+      case 'b_ucheniy': {
+        // Переработка 1.2: вместо заморозки вражеской карты Учёный при выходе
+        // замораживает СВОЮ карту на 1 ход — это временно выключает её, но
+        // после разморозки она получает постоянные +1 HP/+1 ATK (как обычно
+        // работает эффект заморозки). По умолчанию (если цель не выбрана)
+        // замораживает самого себя.
+        const t = targets.cardUid ? player.table.find((c) => c.uid === targets.cardUid && c.hp > 0) : card;
+        if (t) {
+          t.statuses.freeze = Math.max(t.statuses.freeze, 1);
+          this.addLog(`Учёный замораживает ${CARDS[t.defId].name} на 1 ход — усилится после разморозки.`);
+        }
+        break;
+      }
       case 'y_king': {
         const dan = makeCardInstance('tok_dan', player.id);
         player.table.push(dan);
@@ -756,7 +817,9 @@ class Game {
     if (this.phase !== 'action') return { error: 'Сейчас не фаза действия.' };
     if (this.currentPlayer().id !== player.id) return { error: 'Не ваш ход.' };
     this.phase = 'attack';
-    this.addLog(`${player.name} пропускает фазу действия.`);
+    this.armTimer();
+    const bonusDrawn = this.drawMultiple(player, 2);
+    this.addLog(`${player.name} пропускает фазу действия${bonusDrawn > 0 ? ` и добирает ${bonusDrawn} карт(ы) в награду` : ''}.`);
     return { ok: true };
   }
 
@@ -954,22 +1017,6 @@ class Game {
     return { ok: true };
   }
 
-  useScientistFreeze(player, { attackerUid, targetUid }) {
-    if (this.phase !== 'attack') return { error: 'Сейчас не фаза атаки.' };
-    if (this.currentPlayer().id !== player.id) return { error: 'Не ваш ход.' };
-    const scientist = player.table.find((c) => c.uid === attackerUid && c.defId === 'b_ucheniy' && c.hp > 0);
-    if (!scientist) return { error: 'Это не Учёный или он не найден на столе.' };
-    if (scientist.statuses.stun > 0 || scientist.statuses.freeze > 0) return { error: 'Учёный не может сейчас использовать способность.' };
-    const target = this.findAnyCard(targetUid);
-    if (!target || target.ownerId === player.id) return { error: 'Нужна вражеская карта.' };
-    target.statuses.freeze = Math.max(target.statuses.freeze, 1);
-    this.addLog(`Учёный замораживает ${CARDS[target.defId].name} на 1 ход.`);
-    this.checkEliminations();
-    if (this.phase === 'ended') return { ok: true };
-    this.endTurn();
-    return { ok: true };
-  }
-
   // ─────────────────────────── STATE FOR CLIENT ───────────────────────────
 
   publicCard(card) {
@@ -1012,6 +1059,8 @@ class Game {
       log: this.log.slice(-40),
       winnerId: this.winnerId,
       deckCount: this.deck.length,
+      turnDeadline: this.turnDeadline,
+      turnSeconds: this.TURN_SECONDS,
       me: me ? {
         id: me.id,
         hand: me.hand.map((c) => this.publicCard(c)),

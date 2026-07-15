@@ -13,6 +13,7 @@ const { CARDS } = require('./cards');
 const PORT = process.env.PORT || 8080;
 
 const game = new Game();
+game.onAutoUpdate = () => broadcastState();
 const sockets = new Map(); // playerId -> ws
 
 function broadcastState() {
@@ -92,6 +93,18 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // --- эмоции (реакции), просто ретранслируем всем, без изменения состояния игры ---
+    if (msg.type === 'emote') {
+      const allowed = ['👍', '😂', '😮', '😡', '🤔', '🎉', 'GG'];
+      if (allowed.includes(msg.emoji)) {
+        const payload = JSON.stringify({ type: 'emote', playerId: player.id, playerName: player.name, emoji: msg.emoji });
+        for (const s of sockets.values()) {
+          if (s.readyState === WebSocket.OPEN) s.send(payload);
+        }
+      }
+      return;
+    }
+
     let result;
     switch (msg.type) {
       case 'start_game':
@@ -116,9 +129,6 @@ wss.on('connection', (ws) => {
         break;
       case 'skip_attack':
         result = game.skipAttack(player);
-        break;
-      case 'scientist_freeze':
-        result = game.useScientistFreeze(player, { attackerUid: msg.attackerUid, targetUid: msg.targetUid });
         break;
       default:
         return;

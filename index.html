@@ -200,8 +200,10 @@
     <div id="topbar">
       <span>Раунд <b id="round-num">0</b></span>
       <span id="phase-label"></span>
+      <span id="timer-label"></span>
       <span>Колода: <b id="deck-count">0</b></span>
     </div>
+    <div id="emote-bar" style="display:flex; gap:6px; justify-content:center; margin-bottom:10px"></div>
     <div id="opponents"></div>
     <div id="me-panel"></div>
     <div id="log-panel"></div>
@@ -266,12 +268,18 @@
         localStorage.removeItem('danilov2_token');
         el('top-actions').style.display = 'none';
         location.reload();
+      } else if (data.type === 'emote') {
+        showToast(`${data.playerName}: ${data.emoji}`);
       } else if (data.type === 'error') {
         if (data.message === 'REJOIN_FAILED') {
-          myToken = null;
+          // Сервер не нашёл нашу сессию (скорее всего он перезапускался и вся
+          // партия в памяти была потеряна). Раньше здесь просто менялся текст
+          // статуса, а старое игровое поле оставалось на экране замороженным
+          // без обновлений — выглядело как «зависание». Теперь просто чисто
+          // перезагружаем страницу как нового посетителя.
           localStorage.removeItem('danilov2_token');
-          statusEl.textContent = 'Не удалось восстановить сессию — присоединитесь заново';
-          statusEl.className = 'connected';
+          statusEl.textContent = 'Сессия не найдена (сервер перезапускался) — подключаемся заново...';
+          location.reload();
         } else {
           showToast(data.message);
         }
@@ -279,6 +287,20 @@
     };
   }
   connect();
+
+  const EMOTES = ['👍', '😂', '😮', '😡', '🤔', '🎉', 'GG'];
+  el('emote-bar').innerHTML = EMOTES.map((e) => `<button data-emote="${e}" style="font-size:18px;padding:6px 10px">${e}</button>`).join('');
+  el('emote-bar').querySelectorAll('[data-emote]').forEach((btn) => {
+    btn.addEventListener('click', () => send({ type: 'emote', emoji: btn.dataset.emote }));
+  });
+
+  setInterval(() => {
+    const label = el('timer-label');
+    if (!state || !state.turnDeadline || state.phase === 'ended') { label.textContent = ''; return; }
+    const secs = Math.max(0, Math.round((state.turnDeadline - Date.now()) / 1000));
+    label.textContent = `⏳ ${secs}с`;
+    label.style.color = secs <= 10 ? 'var(--bad)' : 'var(--muted)';
+  }, 500);
 
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
 
@@ -539,16 +561,6 @@
     chooseAttackTarget(uid);
   }
 
-  function confirmScientistFreeze() {
-    if (!pendingAction || pendingAction.type !== 'attack') return;
-    const attackerUid = pendingAction.uid;
-    pendingAction = null;
-    gatherTargets('b_ucheniy_freeze', (targets) => {
-      send({ type: 'scientist_freeze', attackerUid, targetUid: targets.cardUid });
-      selection.attackerUid = null;
-    });
-  }
-
   function startMainCardFlow(mainUid) {
     const mainCard = findMyHandCard(mainUid);
     gatherTargets(mainCard.defId, (mainTargets) => {
@@ -607,7 +619,7 @@
     p_ukus: [{ key: 'cardUid', label: 'Выберите вражескую карту, кроме жёлтой (4 урона)', src: 'enemyCards', filter: (c) => c.color !== 'yellow' }],
     p_orest: [{ key: 'sourceDefId', label: 'Кого скопировать на 1 ход (из вашего сброса)?', src: 'discardPile' }],
     p_shutka: [{ key: 'targetPlayerId', label: 'На кого наложить неуязвимость + оглушение на 1 ход?', src: 'allPlayers' }],
-    b_ucheniy_freeze: [{ key: 'cardUid', label: 'Кого заморозить на 1 ход?', src: 'enemyCards' }],
+    b_ucheniy: [{ key: 'cardUid', label: 'Кого заморозить на 1 ход (усилится после разморозки)? Пропустите — заморозит сам себя', src: 'ownCards', optional: true }],
   };
 
   function enemyCardsList(filter) {
@@ -824,12 +836,6 @@
         okBtn.textContent = 'Атаковать';
         okBtn.onclick = confirmPendingAttack;
         buttons.appendChild(okBtn);
-        if (card && card.defId === 'b_ucheniy') {
-          const freezeBtn = document.createElement('button');
-          freezeBtn.textContent = 'Вместо атаки: заморозить';
-          freezeBtn.onclick = confirmScientistFreeze;
-          buttons.appendChild(freezeBtn);
-        }
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = '✕ Отмена';
         cancelBtn.onclick = cancelPending;
