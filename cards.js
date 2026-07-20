@@ -24,7 +24,7 @@ const CARDS = {
     text: 'При выходе: наложите вирус на 1 вражескую карту.',
   },
   w_medic: {
-    id: 'w_medic', name: 'Медик', color: 'white', hp: 3, atk: 0, evasive: true,
+    id: 'w_medic', name: 'Медик', color: 'white', hp: 1, atk: 0, evasive: true,
     text: 'В конце вашего хода лечит все ваши карты на 1 HP. Неуловимость.',
   },
   w_stroitel: {
@@ -62,7 +62,7 @@ const CARDS = {
     text: 'При выходе: следующая выложенная вами карта получает +2 ATK.',
   },
   g_vampire: {
-    id: 'g_vampire', name: 'Вампир', color: 'green', hp: 3, atk: 4,
+    id: 'g_vampire', name: 'Вампир', color: 'green', hp: 5, atk: 2,
     text: 'После атаки лечит себя на 1 HP.',
   },
   g_rikoshet: {
@@ -72,7 +72,7 @@ const CARDS = {
 
   // ───────────────── СИНИЕ ─────────────────
   b_tank: {
-    id: 'b_tank', name: 'Танк', color: 'blue', hp: 15, atk: 2,
+    id: 'b_tank', name: 'Танк', color: 'blue', hp: 10, atk: 2,
     text: 'При выходе: следующая выложенная вами карта получает +3 HP.',
   },
   b_soldier: {
@@ -88,7 +88,7 @@ const CARDS = {
     text: 'При выходе: посмотрите 2 случайные карты в руке врага. Если там есть белая карта — +2 ATK.',
   },
   b_stick: {
-    id: 'b_stick', name: 'Данил с длинной палкой', color: 'blue', hp: 4, atk: 2,
+    id: 'b_stick', name: 'Данил с длинной палкой', color: 'blue', hp: 6, atk: 1,
     text: 'Отражает 50% полученного урона обратно атакующему (округление вниз).',
   },
   b_maso: {
@@ -106,7 +106,7 @@ const CARDS = {
     text: 'При выходе призывает Дана (1/0, Приоритет 3). Каждый ваш ход призывает ещё 1 (макс. 3 Данов).',
   },
   y_titan: {
-    id: 'y_titan', name: 'Титан', color: 'yellow', hp: 28, atk: 1, priority: 1,
+    id: 'y_titan', name: 'Титан', color: 'yellow', hp: 25, atk: 1, priority: 1,
     text: 'Приоритет 1: обязаны атаковать его первым (после Данов и боссов). В свой ход лечится на 1 HP.',
   },
   y_ratatouy: {
@@ -142,7 +142,7 @@ const CARDS = {
 };
 
 const DECK_COUNTS = {
-  white: 3, green: 3, blue: 3, purple: 2,
+  white: 3, green: 3, blue: 3, purple: 3,
 };
 
 const BOSS_COPIES = 3;
